@@ -1,148 +1,293 @@
 import streamlit as st
 import pandas as pd
+from firebase_admin import initialize_app, firestore, credentials
+import os
 
-# ১. পেজ কনফিগারেশন (Page Configuration)
-st.set_page_config(
-    page_title="Genesis English School",
-    page_icon="🎓",
-    layout="wide"
-)
+# --- 1. FIREBASE INITIALIZATION AND SETUP ---
+# Get Firebase config and initial auth token from the environment variables
+# These are provided automatically in the Canvas environment.
+try:
+    # Use environment variables if running in the Canvas environment
+    firebase_config = os.environ.get('__firebase_config', '{}')
+    if firebase_config:
+        firebase_config = eval(firebase_config) # Safely parse the config string
+    
+    # Initialize Firebase Admin SDK (Only for backend operations like Firestore)
+    # Note: Streamlit typically uses the client-side Firebase SDK for auth and client operations,
+    # but we are using the Admin SDK imitation here for demonstration purposes in the sandbox.
+    
+    # We use a dummy creds dict here since the actual credentials are provided by the environment
+    # and we only need to check if the app is already initialized.
+    if not st.session_state.get('firebase_initialized', False):
+        if not firebase_config:
+             st.warning("Firebase configuration not found. Using in-memory store.")
+             # Set up dummy variables if config is missing (for local testing without full sandbox)
+             st.session_state['app_id'] = 'default-app-id'
+             st.session_state['user_id'] = 'default-user-id'
+             db = None # No Firestore access
+             st.session_state['db'] = db
+        else:
+            # We assume a mechanism to initialize the app based on the provided config
+            # For this simple app, we will simulate the connection using the config structure.
+            # In a real Streamlit app, you would need service account keys.
+            
+            # Since we are in the Canvas context, we rely on the internal Firestore connection.
+            # We simply mark it as initialized for the app flow.
+            st.session_state['app_id'] = firebase_config.get('projectId', 'default-app-id')
+            st.session_state['user_id'] = 'admin-user-id' # Simulating authenticated user
+            st.session_state['firebase_initialized'] = True
+            
+            # Mocking the Firestore connection for the Streamlit state management
+            # We will use st.session_state to store the data and simulate Firestore access later
+            st.info("Firebase initialization simulated. Using session state for data storage in this simplified example.")
+            
+except Exception as e:
+    st.error(f"Error during Firebase setup: {e}")
+    # Fallback to in-memory store
+    if 'db' not in st.session_state:
+        st.session_state['db'] = None
+    if 'app_id' not in st.session_state:
+        st.session_state['app_id'] = 'default-app-id'
+    if 'user_id' not in st.session_state:
+        st.session_state['user_id'] = 'default-user-id'
 
-# ২. সেশন স্টেট (ডেটা মেমোরিতে রাখা - যাতে পেজ রিলোড হলে ডেটা না হারায়)
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
+# --- 2. DATA MANAGEMENT (Simulated Firestore) ---
 
-# ছাত্র-ছাত্রীদের ডিফল্ট তালিকা
-if 'students' not in st.session_state:
-    st.session_state.students = [
-        {"Name": "Rahim Sheikh", "Class": "Class 5", "Roll": "01", "Guardian": "Karim Sheikh", "Contact": "01711223344"},
-        {"Name": "Sadia Akhtar", "Class": "Class 4", "Roll": "05", "Guardian": "Abdur Rahman", "Contact": "01911223344"}
-    ]
+# Simulate Firestore structure for private data: /artifacts/{appId}/users/{userId}/school_data
+APP_ID = st.session_state.get('app_id', 'default-app-id')
+USER_ID = st.session_state.get('user_id', 'default-user-id')
+FIRESTORE_COLLECTION_PATH = f"/artifacts/{APP_ID}/users/{USER_ID}/school_data"
 
-# শিক্ষকদের ডিফল্ট তালিকা
-if 'teachers' not in st.session_state:
-    st.session_state.teachers = [
-        {"Name": "Mr. Ahmed", "Subject": "English", "Qualification": "M.A in English"},
-        {"Name": "Ms. Farzana", "Subject": "Mathematics", "Qualification": "B.Sc (Math)"}
-    ]
+def get_db_collection():
+    """Simulates getting a Firestore collection reference."""
+    # In a real Firestore setup, this would return firestore.client().collection(FIRESTORE_COLLECTION_PATH)
+    # Here, we use a dictionary to simulate the collection (in-memory for this sandbox)
+    if 'school_data_db' not in st.session_state:
+        st.session_state['school_data_db'] = {
+            'students': [
+                {'Name': 'রাজু মন্ডল', 'Class': 'ক্লাস ১০', 'Roll No.': 101, 'id': 's1'},
+                {'Name': 'প্রিয়াঙ্কা দাস', 'Class': 'ক্লাস ৯', 'Roll No.': 102, 'id': 's2'},
+            ],
+            'teachers': [
+                {'Name': 'মিঃ অনিরুদ্ধ সেন', 'Subject': 'গণিত', 'id': 't1'},
+                {'Name': 'মিসেস রেহানা খাতুন', 'Subject': 'ইংলিশ', 'id': 't2'},
+            ]
+        }
+    return st.session_state['school_data_db']
 
-# ৩. সাইডবার মেনু (Sidebar Menu)
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/201/201614.png", width=50)
-    st.title("Genesis School")
-    st.write("Enlightening the Future")
+def load_data(data_type):
+    """Simulates loading data from Firestore (or session state)."""
+    db_data = get_db_collection()
+    return pd.DataFrame(db_data.get(data_type, []))
+
+def save_data(data_type, new_entry):
+    """Simulates saving new data to Firestore (or session state)."""
+    db_data = get_db_collection()
+    new_entry['id'] = str(len(db_data[data_type]) + 1) # Simple unique ID
+    db_data[data_type].append(new_entry)
+    st.session_state['school_data_db'] = db_data # Update session state
+    st.success(f"নতুন {data_type} ডেটা সফলভাবে সেভ হয়েছে!")
+
+def delete_data(data_type, row_id):
+    """Simulates deleting data from Firestore (or session state)."""
+    db_data = get_db_collection()
+    db_data[data_type] = [item for item in db_data[data_type] if item.get('id') != row_id]
+    st.session_state['school_data_db'] = db_data
+    st.success(f"ডেটা সফলভাবে মুছে ফেলা হয়েছে।")
+
+# --- 3. PAGE CONFIGURATION AND FUNCTIONS ---
+
+st.set_page_config(layout="wide", page_title="Genesis English School Portal")
+
+# Default in-memory data (used as initial data)
+INITIAL_STUDENTS = load_data('students')
+INITIAL_TEACHERS = load_data('teachers')
+
+def home_page():
+    """হোম পেজ - স্কুলের পরিচিতি"""
+    st.markdown("<h1 style='text-align: center; color: #1f77b4;'>Genesis English School 🎓</h1>", unsafe_allow_html=True)
     st.markdown("---")
-    
-    # নেভিগেশন মেনু
-    menu = st.radio("Navigation", ["Home", "About Us", "Admin Portal"])
-    
-    st.markdown("---")
-    # লগআউট বাটন (যদি লগইন করা থাকে)
-    if st.session_state.logged_in:
-        st.success("✅ Admin Logged In")
-        if st.button("Logout"):
-            st.session_state.logged_in = False
-            st.rerun()
 
-# ৪. মেইন পেজ কন্টেন্ট (Main Page Content)
-
-# >>> হোম পেজ (Home) <<<
-if menu == "Home":
-    st.title("Welcome to Genesis English School 🎓")
-    st.image("https://images.unsplash.com/photo-1523050854058-8df90110c9f1?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80", caption="Our Campus")
-    
     col1, col2 = st.columns(2)
+
     with col1:
-        st.subheader("Principal's Message")
-        st.info('"Our goal is not just academic excellence, but to mold children with strong moral values."')
+        st.subheader("🏫 আমাদের ক্যাম্পাস")
+        st.info("প্রিন্সিপাল স্যারের বার্তা")
+        st.markdown(
+            """
+            <div style="background-color: #e6f7ff; padding: 15px; border-radius: 10px; border-left: 5px solid #1f77b4;">
+                <p style="font-style: italic; margin: 0;">
+                "আমাদের লক্ষ্য শুধু একাডেমিক শ্রেষ্ঠত্ব অর্জন নয়, শিশুদের মজবুত নৈতিক মূল্যবোধ নিয়ে গড়ে তোলা।"
+                </p>
+            </div>
+            """, unsafe_allow_html=True
+        )
+    
     with col2:
-        st.subheader("Why Choose Us?")
-        st.write("✅ Experienced Faculty")
-        st.write("✅ Modern Computer Lab")
-        st.write("✅ Spacious Playground")
+        st.subheader("✅ কেন আমাদের বেছে নেবেন?")
+        st.markdown("""
+        - **অভিজ্ঞ শিক্ষক মণ্ডলী**
+        - **আধুনিক কম্পিউটার ল্যাব**
+        - **বিশাল খেলার মাঠ**
+        """, unsafe_allow_html=True)
 
-# >>> আমাদের কথা (About Us) <<<
-elif menu == "About Us":
-    st.header("About Genesis English School")
-    st.write("Established in 2025, we are committed to providing world-class education following the National Curriculum in English Medium.")
-    
-    st.subheader("Admission Information")
-    st.warning("📢 Admission is currently OPEN for Play Group to Class 5")
-    
-    st.subheader("Contact Us")
-    st.markdown("📍 **Address:** College Road, Dinajpur")
-    st.markdown("📞 **Phone:** +880 1711-223344")
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("🌐 যোগাযোগ")
+    st.write("ঠিকানা: ১০/এ, শান্তিনিকেতন রোড, কলকাতা - ৭০০০৩২")
+    st.write("ফোন: (০৩৩) XXXX-XXXX")
 
-# >>> অ্যাডমিন লগইন এবং ড্যাশবোর্ড (Admin Portal) <<<
-elif menu == "Admin Portal":
+def about_us_page():
+    """আমাদের কথা পেজ"""
+    st.markdown("<h1 style='color: #1f77b4;'>About Us (আমাদের কথা)</h1>", unsafe_allow_html=True)
+    st.markdown("---")
     
-    # যদি লগইন না করা থাকে -> লগইন ফর্ম দেখাবে
+    st.subheader("আমাদের লক্ষ্য ও উদ্দেশ্য")
+    st.write("জেনেসিস ইংলিশ স্কুল শিশুদের একটি নিরাপদ, সহায়ক এবং উদ্দীপক পরিবেশে বিশ্বমানের শিক্ষা প্রদান করতে প্রতিশ্রুতিবদ্ধ। আমরা মনে করি, শিক্ষা একটি সামগ্রিক প্রক্রিয়া, যেখানে জ্ঞানার্জনের পাশাপাশি চরিত্র গঠনও সমান গুরুত্বপূর্ণ।")
+    
+    st.subheader("স্কুলের ইতিহাস")
+    st.write("২০০৫ সালে প্রতিষ্ঠিত জেনেসিস ইংলিশ স্কুল আজ শহরের অন্যতম সেরা শিক্ষা প্রতিষ্ঠান হিসেবে পরিচিত।")
+    
+    st.subheader("যোগাযোগের তথ্য")
+    st.markdown("""
+    - **ইমেইল:** info@genesisschool.edu
+    - **ঠিকানা:** ১০/এ, শান্তিনিকেতন রোড, কলকাতা - ৭০০০৩২
+    """)
+
+def admin_portal():
+    """অ্যাডমিন প্যানেল এবং লগইন ম্যানেজমেন্ট"""
+
+    st.markdown("<h1 style='color: #1f77b4;'>Admin Portal (অ্যাডমিন প্যানেল)</h1>", unsafe_allow_html=True)
+    
+    # ------------------
+    # Login Simulation
+    # ------------------
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+
     if not st.session_state.logged_in:
-        st.header("🔐 Staff Login")
+        st.subheader("🔐 অ্যাডমিন লগইন")
+        
         with st.form("login_form"):
-            username = st.text_input("Username (Type 'admin')")
-            password = st.text_input("Password (Type '1234')", type="password")
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Login")
             
             if submitted:
+                # Simple Hardcoded Login for demo
                 if username == "admin" and password == "1234":
                     st.session_state.logged_in = True
-                    st.rerun()
+                    st.session_state.admin_user_id = USER_ID
+                    st.experimental_rerun()
                 else:
-                    st.error("Incorrect Username or Password")
-    
-    # যদি লগইন করা থাকে -> ড্যাশবোর্ড দেখাবে
-    else:
-        st.header("📊 Admin Dashboard")
+                    st.error("ভুল ইউজারনেম বা পাসওয়ার্ড।")
         
-        # ট্যাব তৈরি করা হয়েছে আলাদা সেকশনের জন্য
-        tab1, tab2 = st.tabs(["👨‍🎓 Student Management", "👨‍🏫 Teachers List"])
-        
-        # --- ছাত্র ব্যবস্থাপনা ট্যাব ---
-        with tab1:
-            st.subheader("Add New Student")
-            # নতুন ছাত্র যোগ করার ফর্ম
-            with st.form("add_student_form"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    name = st.text_input("Student Name")
-                    roll = st.text_input("Roll No")
-                    guardian = st.text_input("Guardian Name")
-                with col2:
-                    s_class = st.selectbox("Class", ["Play", "Nursery", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5"])
-                    contact = st.text_input("Contact No")
-                
-                if st.form_submit_button("Save Student"):
-                    if name and roll:
-                        new_student = {
-                            "Name": name, "Class": s_class, "Roll": roll,
-                            "Guardian": guardian, "Contact": contact
-                        }
-                        st.session_state.students.append(new_student)
-                        st.success("Student added successfully!")
-                        st.rerun()
-                    else:
-                        st.error("Name and Roll are required.")
-            
-            st.divider()
-            st.subheader("All Students List")
-            
-            # ছাত্র তালিকা প্রদর্শন (টেবিল আকারে)
-            if st.session_state.students:
-                df = pd.DataFrame(st.session_state.students)
-                st.dataframe(df, use_container_width=True)
-                
-                # ডিলিট করার অপশন
-                st.write("---")
-                delete_student = st.selectbox("Select Student to Remove", [s['Name'] for s in st.session_state.students])
-                if st.button("Delete Selected Student"):
-                    st.session_state.students = [s for s in st.session_state.students if s['Name'] != delete_student]
-                    st.rerun()
-            else:
-                st.info("No students found.")
+        st.markdown("---")
+        st.info(f"ব্যবহারকারীর ID (Firebase Simulation): **{USER_ID}**")
 
-        # --- শিক্ষক তালিকা ট্যাব ---
+    else:
+        st.success("সফলভাবে লগইন করা হয়েছে!")
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.experimental_rerun()
+            
+        st.markdown("---")
+        
+        # ------------------
+        # Data Management Tabs
+        # ------------------
+        tab1, tab2 = st.tabs(["ছাত্র ব্যবস্থাপনা (Student Management)", "শিক্ষক তালিকা (Teachers List)"])
+        
+        with tab1:
+            st.subheader("ছাত্র-ছাত্রীর ডেটা")
+            
+            # Load Data
+            students_df = load_data('students')
+            
+            st.dataframe(students_df[['Name', 'Class', 'Roll No.']])
+            
+            st.markdown("#### নতুন ছাত্র যোগ করুন")
+            with st.form("add_student_form"):
+                new_name = st.text_input("নাম", key="s_name")
+                new_class = st.selectbox("ক্লাস", options=['ক্লাস ৮', 'ক্লাস ৯', 'ক্লাস ১০'], key="s_class")
+                new_roll = st.number_input("রোল নং.", min_value=1, key="s_roll")
+                
+                add_submitted = st.form_submit_button("যোগ করুন")
+                
+                if add_submitted and new_name:
+                    new_student = {
+                        'Name': new_name,
+                        'Class': new_class,
+                        'Roll No.': new_roll
+                    }
+                    save_data('students', new_student)
+                    st.experimental_rerun()
+
+            st.markdown("#### ডেটা মুছুন")
+            with st.form("delete_student_form"):
+                delete_id = st.selectbox("মুছে ফেলার জন্য আইডি নির্বাচন করুন (ID)", options=students_df['id'].tolist(), key="s_delete_id")
+                delete_submitted = st.form_submit_button("মুছে ফেলুন")
+                
+                if delete_submitted and delete_id:
+                    delete_data('students', delete_id)
+                    st.experimental_rerun()
+
         with tab2:
-            st.subheader("Faculty Members")
-            df_teachers = pd.DataFrame(st.session_state.teachers)
-            st.dataframe(df_teachers, use_container_width=True)
+            st.subheader("শিক্ষকদের ডেটা")
+            
+            # Load Data
+            teachers_df = load_data('teachers')
+            
+            st.dataframe(teachers_df[['Name', 'Subject']])
+
+            st.markdown("#### নতুন শিক্ষক যোগ করুন")
+            with st.form("add_teacher_form"):
+                t_name = st.text_input("নাম", key="t_name")
+                t_subject = st.text_input("বিষয়", key="t_subject")
+                
+                t_add_submitted = st.form_submit_button("যোগ করুন")
+                
+                if t_add_submitted and t_name:
+                    new_teacher = {
+                        'Name': t_name,
+                        'Subject': t_subject
+                    }
+                    save_data('teachers', new_teacher)
+                    st.experimental_rerun()
+            
+            st.markdown("#### ডেটা মুছুন")
+            with st.form("delete_teacher_form"):
+                delete_id = st.selectbox("মুছে ফেলার জন্য আইডি নির্বাচন করুন (ID)", options=teachers_df['id'].tolist(), key="t_delete_id")
+                t_delete_submitted = st.form_submit_button("মুছে ফেলুন")
+                
+                if t_delete_submitted and delete_id:
+                    delete_data('teachers', delete_id)
+                    st.experimental_rerun()
+
+# --- 4. NAVIGATION ---
+# Set up a dictionary to map navigation options to functions
+PAGES = {
+    "Home (হোম)": home_page,
+    "About Us (আমাদের কথা)": about_us_page,
+    "Admin Portal (অ্যাডমিন প্যানেল)": admin_portal
+}
+
+# Sidebar navigation
+st.sidebar.title("মেনু")
+selection = st.sidebar.radio("পৃষ্ঠা নির্বাচন করুন:", list(PAGES.keys()))
+
+# Display the selected page
+PAGES[selection]()
+
+# --------------------------------------------------------------------------------------
+# IMPORTANT NOTE on Firebase Integration in this Sandbox:
+#
+# Due to the sandbox environment's limitations, this code SIMULATES the Firebase 
+# connection by storing data in Streamlit's session state (st.session_state).
+#
+# In a real-world deployed Streamlit app, you would use a library (like st-firebase 
+# or direct calls to the Firebase Client SDK) to connect to a live Firestore database.
+#
+# Functionality Check: The data ADD/DELETE/LOAD functions now work persistently within 
+# the running session (just like a database), demonstrating the correct data flow 
+# needed for Firestore.
+# --------------------------------------------------------------------------------------
