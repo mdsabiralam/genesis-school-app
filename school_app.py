@@ -4,49 +4,68 @@ from firebase_admin import initialize_app, firestore, credentials
 import os
 import json
 from google.oauth2 import service_account
+import firebase_admin # Necessary for get_apps()
 
 # --- 1. CONFIGURATION AND FIREBASE SETUP ---
-# Get Firebase config and initial auth token from the environment variables
-# These are provided automatically in the Canvas environment.
+# Get Firebase config from the environment variables and ensure the app is only initialized once.
 try:
     # 1. Check for Firebase credentials in Streamlit Secrets
-    if "firestore_creds" not in st.session_state:
-        # Check if secrets are available (for Streamlit Cloud deployment)
-        if st.secrets.get("firebase", {}):
-            st.session_state.firestore_creds = st.secrets["firebase"]
-            
-            # --- Initialize Firebase Admin SDK using secrets ---
-            # Streamlit secrets are securely loaded into st.secrets object.
+    if st.secrets.get("firebase", {}):
+        firestore_creds = st.secrets["firebase"]
+        
+        # --- Check if app is already initialized ---
+        # The project ID is used as a unique name for the Firebase app instance
+        project_name = firestore_creds.get("project_id", "default-app-name")
+        
+        # Check if the app is already initialized to prevent the "already exists" error
+        if not any(app.name == project_name for app in firebase_admin.get_apps()):
             
             # Create a credential object from the secrets data
-            creds = credentials.Certificate(dict(st.session_state.firestore_creds))
+            creds_dict = {
+                "type": firestore_creds.get("type"),
+                "project_id": firestore_creds.get("project_id"),
+                "private_key_id": firestore_creds.get("private_key_id"),
+                # CRITICAL FIX: Replace escaped newlines for the private key to work
+                "private_key": firestore_creds.get("private_key").replace('\\n', '\n'), 
+                "client_email": firestore_creds.get("client_email"),
+                "client_id": firestore_creds.get("client_id"),
+                "auth_uri": firestore_creds.get("auth_uri"),
+                "token_uri": firestore_creds.get("token_uri"),
+                "auth_provider_x509_cert_url": firestore_creds.get("auth_provider_x509_cert_url"),
+                "client_x509_cert_url": firestore_creds.get("client_x509_cert_url"),
+            }
+
+            creds = credentials.Certificate(creds_dict)
             
-            # Initialize the Firebase App (only if not already initialized)
-            # The 'name' parameter is necessary to avoid re-initialization error
-            if not initialize_app(creds, name=st.session_state.firestore_creds.get("project_id", "default-app-name")):
-                initialize_app(creds, name=st.session_state.firestore_creds["project_id"])
+            # Initialize the Firebase App (with a specific name to avoid conflict)
+            firebase_app = initialize_app(creds, name=project_name)
             
             # Get the Firestore client
-            db = firestore.client()
+            db = firestore.client(firebase_app)
             st.session_state.db = db
             st.success("Connected to Firebase Firestore successfully!")
 
-        else:
-            # Fallback to in-memory store if no secrets are found
-            st.warning("Firebase credentials not found. Using temporary in-memory store.")
-            st.session_state.db = None # Mark as no real DB connection
-            st.session_state.temp_data = {
-                'students': [
-                    {'Name': 'Rajesh Mandal', 'Class': 'Class 10', 'Roll No.': 101, 'id': 's1'},
-                    {'Name': 'Priyanka Das', 'Class': 'Class 9', 'Roll No.': 102, 'id': 's2'},
-                ],
-                'teachers': [
-                    {'Name': 'Mr. Aniruddha Sen', 'Subject': 'Math', 'id': 't1'},
-                    {'Name': 'Mrs. Rehana Khatun', 'Subject': 'English', 'id': 't2'},
-                ]
-            }
+        elif 'db' not in st.session_state:
+             # If initialized but DB client not saved in session state, retrieve it.
+             st.session_state.db = firestore.client(firebase_admin.get_app(project_name))
+
+    else:
+        # Fallback to in-memory store if no secrets are found
+        st.warning("Firebase credentials not found. Using temporary in-memory store.")
+        st.session_state.db = None # Mark as no real DB connection
+        st.session_state.temp_data = {
+            'students': [
+                {'Name': 'Rajesh Mandal', 'Class': 'Class 10', 'Roll No.': 101, 'id': 's1'},
+                {'Name': 'Priyanka Das', 'Class': 'Class 9', 'Roll No.': 102, 'id': 's2'},
+            ],
+            'teachers': [
+                {'Name': 'Mr. Aniruddha Sen', 'Subject': 'Math', 'id': 't1'},
+                {'Name': 'Mrs. Rehana Khatun', 'Subject': 'English', 'id': 't2'},
+            ]
+        }
 
 except Exception as e:
+    # If any error occurs during setup (e.g., wrong secret format)
     st.error(f"Error during Firebase setup: {e}. Please check your secrets.")
     st.session_state.db = None
     st.session_state.temp_data = {} # Ensure temp data exists as fallback
@@ -59,9 +78,13 @@ def load_data(data_type):
     """Loads data from Firestore or temporary store."""
     if st.session_state.db:
         # Load from Firestore (Real Persistence)
-        docs = st.session_state.db.collection(FIRESTORE_COLLECTION_NAME).document("main_data").collection(data_type).stream()
-        data = [doc.to_dict() for doc in docs]
-        return pd.DataFrame(data)
+        try:
+            docs = st.session_state.db.collection(FIRESTORE_COLLECTION_NAME).document("main_data").collection(data_type).stream()
+            data = [doc.to_dict() for doc in docs]
+            return pd.DataFrame(data)
+        except Exception as e:
+            st.error(f"Error loading data from Firestore: {e}")
+            return pd.DataFrame()
     else:
         # Load from temporary store
         return pd.DataFrame(st.session_state.temp_data.get(data_type, []))
@@ -100,7 +123,7 @@ def delete_data(data_type, row_id):
         st.session_state.temp_data[data_type] = [item for item in data if item.get('id') != row_id]
         st.success(f"Data successfully deleted from temporary store.")
 
-# --- 3. PAGE CONFIGURATION AND FUNCTIONS ---
+# --- 3. PAGE CONFIGURATION AND FUNCTIONS (UI) ---
 
 st.set_page_config(layout="wide", page_title="Genesis English School Portal")
 
@@ -179,7 +202,7 @@ def admin_portal():
                 # Simple Hardcoded Login for demo
                 if username == "admin" and password == "1234":
                     st.session_state.logged_in = True
-                    st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+                    st.rerun()
                 else:
                     st.error("Invalid Username or Password.")
         
@@ -191,7 +214,7 @@ def admin_portal():
         st.success("Logged In Successfully!")
         if st.button("Logout"):
             st.session_state.logged_in = False
-            st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+            st.rerun()
             
         st.markdown("---")
         
@@ -224,7 +247,7 @@ def admin_portal():
                         'Roll No.': new_roll
                     }
                     save_data('students', new_student)
-                    st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+                    st.rerun()
 
             st.markdown("#### Delete Data")
             if not students_df.empty:
@@ -244,7 +267,7 @@ def admin_portal():
                     
                     if delete_submitted and delete_id:
                         delete_data('students', delete_id)
-                        st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+                        st.rerun()
 
         with tab2:
             st.subheader("Teachers Data")
@@ -270,7 +293,7 @@ def admin_portal():
                         'Subject': t_subject
                     }
                     save_data('teachers', new_teacher)
-                    st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+                    st.rerun()
             
             st.markdown("#### Delete Data")
             if not teachers_df.empty:
@@ -288,7 +311,7 @@ def admin_portal():
                     
                     if t_delete_submitted and delete_id:
                         delete_data('teachers', delete_id)
-                        st.rerun() # Corrected: st.experimental_rerun() -> st.rerun()
+                        st.rerun()
 
 # --- 4. NAVIGATION ---
 PAGES = {
