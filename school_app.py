@@ -5,24 +5,25 @@ import os
 import json
 from google.oauth2 import service_account
 import firebase_admin 
-import pyrebase # Pyrebase for Authentication
+import pyrebase 
 
 # --- 1. CONFIGURATION AND FIREBASE SETUP ---
-# Get Firebase config from the environment variables and ensure the app is only initialized once.
 try:
     if st.secrets.get("firebase", {}):
         firestore_creds = st.secrets["firebase"]
-        
-        # --- Prepare Admin SDK Credentials for Firestore ---
         project_name = firestore_creds.get("project_id", "default-app-name")
+        
+        # --- Check and Initialize Firebase App ---
+        # The logic is fixed to handle the "already exists" error using try/except
         
         if 'db' not in st.session_state or st.session_state.db is None: 
             
-            # 1a. Prepare Admin SDK (for Firestore)
+            # 1a. Prepare Admin SDK (for Firestore) Credentials
             creds_dict = {
                 "type": firestore_creds.get("type"),
                 "project_id": firestore_creds.get("project_id"),
                 "private_key_id": firestore_creds.get("private_key_id"),
+                # CRITICAL FIX: Replace escaped newlines for the private key to work
                 "private_key": firestore_creds.get("private_key").replace('\\n', '\n'), 
                 "client_email": firestore_creds.get("client_email"),
                 "client_id": firestore_creds.get("client_id"),
@@ -33,11 +34,15 @@ try:
             }
             creds = credentials.Certificate(creds_dict)
             
+            firebase_app = None
             try:
+                # 1. Try to initialize the app
                 firebase_app = initialize_app(creds, name=project_name)
             except ValueError:
+                # 2. If it already exists, retrieve the existing app instance
                 firebase_app = firebase_admin.get_app(name=project_name)
 
+            # Get the Firestore client
             db = firestore.client(firebase_app)
             st.session_state.db = db
             
@@ -80,7 +85,7 @@ except Exception as e:
     st.session_state.temp_data = {} 
 
 
-# --- 2. DATA MANAGEMENT FUNCTIONS (UNCHANGED) ---
+# --- 2. DATA MANAGEMENT FUNCTIONS ---
 
 FIRESTORE_COLLECTION_NAME = "school_data"
 
@@ -178,7 +183,6 @@ def admin_portal():
     
     # --- Authentication Logic ---
     
-    # CRITICAL CHECK: Ensure pyrebase is initialized before calling st.session_state.firebase_auth
     if 'firebase_auth' not in st.session_state:
         st.error("Authentication system not initialized. Please check Firebase secrets (API key & auth domain).")
         return
