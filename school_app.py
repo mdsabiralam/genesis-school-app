@@ -5,25 +5,22 @@ import os
 import json
 from google.oauth2 import service_account
 import firebase_admin 
-import pyrebase 
+# import pyrebase # Pyrebase is removed to fix deployment issues
 
 # --- 1. CONFIGURATION AND FIREBASE SETUP ---
+# FIX: Removed unstable Pyrebase integration logic. Reverted to Admin SDK only.
 try:
     if st.secrets.get("firebase", {}):
         firestore_creds = st.secrets["firebase"]
         project_name = firestore_creds.get("project_id", "default-app-name")
         
-        # --- Check and Initialize Firebase App ---
-        # The logic is fixed to handle the "already exists" error using try/except
-        
         if 'db' not in st.session_state or st.session_state.db is None: 
             
-            # 1a. Prepare Admin SDK (for Firestore) Credentials
+            # Prepare Admin SDK (for Firestore) Credentials
             creds_dict = {
                 "type": firestore_creds.get("type"),
                 "project_id": firestore_creds.get("project_id"),
                 "private_key_id": firestore_creds.get("private_key_id"),
-                # CRITICAL FIX: Replace escaped newlines for the private key to work
                 "private_key": firestore_creds.get("private_key").replace('\\n', '\n'), 
                 "client_email": firestore_creds.get("client_email"),
                 "client_id": firestore_creds.get("client_id"),
@@ -34,33 +31,19 @@ try:
             }
             creds = credentials.Certificate(creds_dict)
             
+            # Use try/except logic to handle the "already exists" error gracefully
             firebase_app = None
             try:
-                # 1. Try to initialize the app
                 firebase_app = initialize_app(creds, name=project_name)
             except ValueError:
-                # 2. If it already exists, retrieve the existing app instance
+                # App already exists, retrieve the existing app instance
                 firebase_app = firebase_admin.get_app(name=project_name)
 
-            # Get the Firestore client
             db = firestore.client(firebase_app)
             st.session_state.db = db
             
-            # 1b. Prepare Client SDK Config for Pyrebase (for Authentication)
-            firebase_config_client = {
-                "apiKey": firestore_creds.get("api_key"),
-                "authDomain": firestore_creds.get("auth_domain"),
-                "databaseURL": f"https://{project_name}.firebaseio.com",
-                "projectId": project_name,
-                "storageBucket": f"{project_name}.appspot.com",
-                "messagingSenderId": firestore_creds.get("messaging_sender_id", "DEFAULT_SENDER_ID"),
-                "appId": firestore_creds.get("app_id", "DEFAULT_APP_ID"),
-                "measurementId": firestore_creds.get("measurement_id", "DEFAULT_MEASUREMENT_ID")
-            }
-            
-            # Initialize Pyrebase
-            st.session_state.firebase_auth = pyrebase.initialize_app(firebase_config_client)
-            st.success("Connected to Firebase Firestore and Authentication successfully!")
+            # Pyrebase initialization code removed
+            st.success("Connected to Firebase Firestore successfully! (Authentication is hardcoded)")
 
         elif 'db' not in st.session_state:
              st.session_state.db = firestore.client(firebase_admin.get_app(project_name))
@@ -85,7 +68,7 @@ except Exception as e:
     st.session_state.temp_data = {} 
 
 
-# --- 2. DATA MANAGEMENT FUNCTIONS ---
+# --- 2. DATA MANAGEMENT FUNCTIONS (UNCHANGED) ---
 
 FIRESTORE_COLLECTION_NAME = "school_data"
 
@@ -132,14 +115,13 @@ def delete_data(data_type, row_id):
         st.session_state.temp_data[data_type] = [item for item in data if item.get('id') != row_id]
         st.success(f"Data successfully deleted from temporary store.")
 
-# --- 3. UI FUNCTIONS AND AUTHENTICATION LOGIC ---
+# --- 3. UI FUNCTIONS AND AUTHENTICATION LOGIC (Hardcoded Login) ---
 
 st.set_page_config(layout="wide", page_title="Genesis English School Portal")
 
 def home_page():
     st.markdown("<h1 style='text-align: center; color: #1f77b4;'>Genesis English School 🎓</h1>", unsafe_allow_html=True)
     st.markdown("---")
-    # ... [Home Page Content Unchanged] ...
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("🏫 Our Campus")
@@ -181,47 +163,22 @@ def about_us_page():
 def admin_portal():
     st.markdown("<h1 style='color: #1f77b4;'>Admin Portal</h1>", unsafe_allow_html=True)
     
-    # --- Authentication Logic ---
-    
-    if 'firebase_auth' not in st.session_state:
-        st.error("Authentication system not initialized. Please check Firebase secrets (API key & auth domain).")
-        return
-        
-    auth = st.session_state.firebase_auth.auth()
-
-    if not st.session_state.logged_in:
+    if not st.session_state.get('logged_in', False):
         st.subheader("🔐 Staff Login")
         
-        # New User Sign Up (Only shown if needed)
-        st.markdown("---")
-        if st.checkbox("Sign Up (New User)"):
-            with st.form("signup_form"):
-                new_email = st.text_input("New Email (Use a valid email for testing)")
-                new_password = st.text_input("New Password (Min 6 characters)", type="password")
-                signup_submitted = st.form_submit_button("Create Account")
-                
-                if signup_submitted:
-                    try:
-                        user = auth.create_user_with_email_and_password(new_email, new_password)
-                        st.success("Account created successfully! You can now log in.")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Signup Failed: {e}")
-
-        # Login Form
+        # Reverted to simple hardcoded login
         with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
+            email_input = st.text_input("Username (admin)")
+            password_input = st.text_input("Password (1234)", type="password")
             submitted = st.form_submit_button("Login")
             
             if submitted:
-                try:
-                    user = auth.sign_in_with_email_and_password(email, password)
+                if email_input == "admin" and password_input == "1234":
                     st.session_state.logged_in = True
-                    st.session_state.user_info = user # Store user info
+                    st.session_state.user_info = {'email': 'admin@genesis.edu'} # Mock user info
                     st.rerun()
-                except Exception as e:
-                    st.error("Login Failed: Invalid email or password.")
+                else:
+                    st.error("Login Failed: Invalid username or password.")
         
         st.markdown("---")
         if not st.session_state.db:
@@ -237,7 +194,7 @@ def admin_portal():
             
         st.markdown("---")
         
-        # --- Data Management Tabs (UNCHANGED) ---
+        # --- Data Management Tabs ---
         tab1, tab2 = st.tabs(["👨‍🎓 Student Management", "👨‍🏫 Teachers List"])
         
         with tab1:
