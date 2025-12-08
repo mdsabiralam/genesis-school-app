@@ -48,9 +48,9 @@ try:
                 "databaseURL": f"https://{project_name}.firebaseio.com",
                 "projectId": project_name,
                 "storageBucket": f"{project_name}.appspot.com",
-                "messagingSenderId": "YOUR_SENDER_ID",
-                "appId": firestore_creds.get("appId", "YOUR_APP_ID"),
-                "measurementId": "YOUR_MEASUREMENT_ID"
+                "messagingSenderId": firestore_creds.get("messaging_sender_id", "DEFAULT_SENDER_ID"),
+                "appId": firestore_creds.get("app_id", "DEFAULT_APP_ID"),
+                "measurementId": firestore_creds.get("measurement_id", "DEFAULT_MEASUREMENT_ID")
             }
             
             # Initialize Pyrebase
@@ -177,6 +177,12 @@ def admin_portal():
     st.markdown("<h1 style='color: #1f77b4;'>Admin Portal</h1>", unsafe_allow_html=True)
     
     # --- Authentication Logic ---
+    
+    # CRITICAL CHECK: Ensure pyrebase is initialized before calling st.session_state.firebase_auth
+    if 'firebase_auth' not in st.session_state:
+        st.error("Authentication system not initialized. Please check Firebase secrets (API key & auth domain).")
+        return
+        
     auth = st.session_state.firebase_auth.auth()
 
     if not st.session_state.logged_in:
