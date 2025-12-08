@@ -17,7 +17,6 @@ try:
         project_name = firestore_creds.get("project_id", "default-app-name")
         
         # --- Check and Initialize Firebase App (FIXED LOGIC) ---
-        # The goal is to initialize the app only once, eliminating the need for get_apps()
         
         if 'db' not in st.session_state or st.session_state.db is None: 
             
@@ -42,7 +41,7 @@ try:
                 # 1. Try to initialize the app
                 firebase_app = initialize_app(creds, name=project_name)
             except ValueError:
-                # 2. If it already exists, retrieve the existing app instance
+                # 2. If it already exists (due to a previous run), retrieve the existing app instance
                 firebase_app = firebase_admin.get_app(name=project_name)
 
             # Get the Firestore client and save it to session state
@@ -50,8 +49,10 @@ try:
             st.session_state.db = db
             st.success("Connected to Firebase Firestore successfully!")
 
-        # If DB is already in session state, we assume connection is fine
-        
+        elif 'db' not in st.session_state:
+             # If initialized but DB client not saved in session state, retrieve it.
+             st.session_state.db = firestore.client(firebase_admin.get_app(project_name))
+
     else:
         # Fallback to in-memory store if no secrets are found
         st.warning("Firebase credentials not found. Using temporary in-memory store.")
